@@ -1,0 +1,15 @@
+[
+  {
+    "email": "sameer.k@hyperverge.co",
+    "password": "$2b$10$j4CWeJJiIL.dwVQAmkGTNOwYp3Ay1OcD/CYO.IM9nKIAEnLgyLJ.6",
+    "role": "admin",
+    "createdAt": "2026-03-10T07:23:49.186Z"
+  },
+  {
+    "email": "sameerkatte@gmail.com",
+    "password": "$2b$10$QiLN7F9f20VmcLYjnKSpDukOfTpsIfbIIgWWiFLnHV4laMx.Gd.xa",
+    "role": "user",
+    "bucketId": "test2",
+    "createdAt": "2026-03-10T10:14:05.066Z"
+  }
+]

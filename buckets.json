@@ -1,0 +1,24 @@
+[
+  {
+    "id": "default",
+    "name": "Default",
+    "spreadsheetId": "1oyQd7EEo54pvXxUya2Wq09fbm2xV3GSjqGnQIRuIATM",
+    "appsScriptUrl": "https://script.google.com/macros/s/AKfycby9YjqWgXu-Yys9Z5MJ-Zp9bjWPbZcxiv7nQvAiEAeZ1zpvA3ZmtM1mIoZp3_gluhsyug/exec",
+    "appsScriptApiKey": "cr_jXo2Y2JJnDVmspWLjwiD3MR48",
+    "createdAt": "2026-03-10T08:41:28.567Z",
+    "hvApiUrl": "https://ind-engine.thomas.hyperverge.co/v1/criminalRiskCheck",
+    "hvAppId": "yf9atv",
+    "hvAppKey": "i28ekdxxyj2mzqocboe9",
+    "batchSize": 100,
+    "qps": 15,
+    "maxRetries": 3
+  },
+  {
+    "id": "test2",
+    "name": "test2",
+    "spreadsheetId": "1oyQd7EEo54pvXxUya2Wq09fbm2xV3GSjqGnQIRuIATM",
+    "appsScriptUrl": "https://script.google.com/macros/s/AKfycby9YjqWgXu-Yys9Z5MJ-Zp9bjWPbZcxiv7nQvAiEAeZ1zpvA3ZmtM1mIoZp3_gluhsyug/exec",
+    "appsScriptApiKey": "cr_jXo2Y2JJnDVmspWLjwiD3MR48",
+    "createdAt": "2026-03-10T10:13:39.825Z"
+  }
+]

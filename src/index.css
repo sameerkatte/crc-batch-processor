@@ -1,0 +1,246 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(124, 58, 237, 0.15);
+}
+
+input::placeholder {
+  color: var(--gray-8);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--gray-6);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--gray-8);
+}
+
+/* ── Light Mode (default) ─────────────────────────────────────────── */
+
+:root,
+[data-theme="light"] {
+  --bg-page: #f5f6fa;
+  --bg-sidebar: #1a1a2e;
+  --bg-card: #ffffff;
+  --bg-topbar: #ffffff;
+  --bg-input: #f8f9fc;
+  --bg-drop: #faf8ff;
+  --bg-drop-hover: #f5f3ff;
+  --bg-user-row: #f8f9fc;
+  --border-card: #eef0f4;
+  --border-input: #e2e8f0;
+  --border-drop: #ddd6fe;
+  --border-drop-active: #7c3aed;
+  --text-heading: #1a1a2e;
+  --text-muted: #8b8fa3;
+  --text-body: #374151;
+  --topbar-border: #eef0f4;
+  --upload-icon-bg: #ede9fe;
+  --log-time-color: #b0b3c0;
+  --sidebar-text: rgba(255,255,255,0.6);
+  --sidebar-text-active: #fff;
+}
+
+/* ── Dark Mode ────────────────────────────────────────────────────── */
+
+[data-theme="dark"] {
+  --bg-page: #0f0f17;
+  --bg-sidebar: #111119;
+  --bg-card: #1a1a26;
+  --bg-topbar: #141420;
+  --bg-input: #1e1e2e;
+  --bg-drop: #16162a;
+  --bg-drop-hover: #1e1e3a;
+  --bg-user-row: #1e1e2e;
+  --border-card: #2a2a3a;
+  --border-input: #2a2a3e;
+  --border-drop: #3a3a5a;
+  --border-drop-active: #a855f7;
+  --text-heading: #e8e8f0;
+  --text-muted: #6b6b82;
+  --text-body: #c8c8d8;
+  --topbar-border: #222234;
+  --upload-icon-bg: rgba(124,58,237,0.15);
+  --log-time-color: #555566;
+  --sidebar-text: rgba(255,255,255,0.45);
+  --sidebar-text-active: #fff;
+}
+
+/* ── Sidebar ──────────────────────────────────────────────────────── */
+
+.sidebar {
+  background: var(--bg-sidebar);
+  border-right: 1px solid rgba(255,255,255,0.06);
+}
+
+/* ── Top Bar ──────────────────────────────────────────────────────── */
+
+.topbar {
+  background: var(--bg-topbar);
+  border-bottom: 1px solid var(--topbar-border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.heading-text {
+  color: var(--text-heading);
+}
+
+.muted-text {
+  color: var(--text-muted);
+}
+
+/* ── Cards ────────────────────────────────────────────────────────── */
+
+.main-card {
+  background: var(--bg-card) !important;
+  border: 1px solid var(--border-card) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04) !important;
+}
+
+/* ── Drop Zone ────────────────────────────────────────────────────── */
+
+.drop-zone {
+  border: 2px dashed var(--border-drop);
+  border-radius: 16px;
+  padding: 48px 20px;
+  text-align: center;
+  cursor: pointer;
+  background: var(--bg-drop);
+  transition: all 0.2s ease;
+}
+
+.drop-zone.has-file {
+  padding: 24px 20px;
+}
+
+.drop-zone.drag-over {
+  border-color: var(--border-drop-active);
+  background: var(--bg-drop-hover);
+}
+
+.drop-zone:hover {
+  border-color: var(--border-drop-active);
+}
+
+.upload-icon-wrap {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: var(--upload-icon-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 4px;
+}
+
+/* ── Inputs ───────────────────────────────────────────────────────── */
+
+.text-input {
+  flex: 1;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1.5px solid var(--border-input);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-heading);
+  outline: none;
+  background: var(--bg-input);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.text-input:focus {
+  border-color: var(--accent-9, #7c3aed);
+  box-shadow: 0 0 0 3px rgba(124,58,237,0.08);
+}
+
+/* ── Log Panel ────────────────────────────────────────────────────── */
+
+.log-panel {
+  max-height: 280px;
+  overflow-y: auto;
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+  font-size: 13px;
+  line-height: 1.9;
+  padding: 4px 0;
+}
+
+.log-time {
+  color: var(--log-time-color);
+  white-space: nowrap;
+  min-width: 60px;
+  font-family: inherit;
+}
+
+/* ── User Rows (Admin) ────────────────────────────────────────────── */
+
+.user-row {
+  background: var(--bg-user-row);
+  border-radius: 12px;
+  border: 1px solid var(--border-card);
+}
+
+.user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--upload-icon-bg);
+}
+
+/* ── Banners ──────────────────────────────────────────────────────── */
+
+.banner-done {
+  background: linear-gradient(135deg, #f0fdf4, #ecfdf5) !important;
+  border: 1px solid #bbf7d0 !important;
+  border-radius: 16px !important;
+}
+
+.banner-error {
+  background: #fef2f2 !important;
+  border: 1px solid #fecaca !important;
+  border-radius: 16px !important;
+}
+
+[data-theme="dark"] .banner-done {
+  background: rgba(22, 163, 106, 0.08) !important;
+  border-color: rgba(22, 163, 106, 0.2) !important;
+}
+
+[data-theme="dark"] .banner-error {
+  background: rgba(220, 38, 38, 0.08) !important;
+  border-color: rgba(220, 38, 38, 0.2) !important;
+}
+
+/* ── Animations ──────────────────────────────────────────────────── */
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
