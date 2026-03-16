@@ -22,7 +22,8 @@
     "bucketId": "default",
     "uploadedAt": "2026-03-12T10:28:14.719Z",
     "triggerResult": "500: Server misconfigured: API_KEY missing",
-    "status": "running"
+    "status": "done_with_errors",
+    "completedAt": "2026-03-16T06:44:29.203Z"
   },
   {
     "id": "1773310794394-if3jph",
@@ -33,7 +34,8 @@
     "bucketId": "default",
     "uploadedAt": "2026-03-12T10:19:54.394Z",
     "triggerResult": "500: Server misconfigured: API_KEY missing",
-    "status": "running"
+    "status": "done_with_errors",
+    "completedAt": "2026-03-16T06:44:29.205Z"
   },
   {
     "id": "1773310427133-a9xq7e",
@@ -44,7 +46,8 @@
     "bucketId": "default",
     "uploadedAt": "2026-03-12T10:13:47.133Z",
     "triggerResult": "401: Unauthorized",
-    "status": "running"
+    "status": "done_with_errors",
+    "completedAt": "2026-03-16T06:44:29.205Z"
   },
   {
     "id": "1773136579297-cxq7a5",
@@ -83,7 +86,8 @@
     "bucketId": "default",
     "uploadedAt": "2026-03-10T09:37:47.149Z",
     "triggerResult": "500: ReferenceError: startCriminalRiskJob_ is not defined",
-    "status": "running"
+    "status": "done_with_errors",
+    "completedAt": "2026-03-16T06:44:29.205Z"
   },
   {
     "id": "1773135253626-cz4idz",
@@ -94,7 +98,8 @@
     "bucketId": "default",
     "uploadedAt": "2026-03-10T09:34:13.626Z",
     "triggerResult": "500: ReferenceError: startCriminalRiskJob_ is not defined",
-    "status": "running"
+    "status": "done_with_errors",
+    "completedAt": "2026-03-16T06:44:29.205Z"
   },
   {
     "id": "1773134726692-s3x6tr",
@@ -105,7 +110,8 @@
     "bucketId": "default",
     "uploadedAt": "2026-03-10T09:25:26.692Z",
     "triggerResult": 500,
-    "status": "running"
+    "status": "done_with_errors",
+    "completedAt": "2026-03-16T06:44:29.205Z"
   },
   {
     "id": "1773134214448-qpfvya",
@@ -116,7 +122,8 @@
     "bucketId": "default",
     "uploadedAt": "2026-03-10T09:16:54.448Z",
     "triggerResult": 401,
-    "status": "running"
+    "status": "done_with_errors",
+    "completedAt": "2026-03-16T06:44:29.205Z"
   },
   {
     "id": "1773134129983-50lmd3",

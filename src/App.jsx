@@ -36,7 +36,7 @@ function Sidebar({ page, setPage, user, onLogout, token }) {
   const [sheetUrl, setSheetUrl] = useState(null);
 
   useEffect(() => {
-    if (user?.role === 'admin' && token) {
+    if (token) {
       fetch(`${API_BASE}/my-bucket`, {
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -107,9 +107,9 @@ function Sidebar({ page, setPage, user, onLogout, token }) {
         ))}
       </Flex>
 
-      {/* Bottom: Sheet link (admin) + Theme toggle + Logout */}
+      {/* Bottom: Sheet link + Theme toggle + Logout */}
       <Flex direction="column" align="center" gap="1">
-        {user?.role === 'admin' && sheetUrl && (
+        {sheetUrl && (
           <Tooltip content="Open Spreadsheet" side="right">
             <a
               href={sheetUrl}
@@ -247,7 +247,11 @@ export default function App() {
   }, []);
 
   const addLog = useCallback((icon, msg) => {
-    setLogs(prev => [...prev, { time: timestamp(), icon, msg }]);
+    setLogs(prev => {
+      // Stop spinner on previous sync entries — only the newest active step should spin
+      const updated = prev.map(l => l.icon === 'sync' ? { ...l, icon: 'ok' } : l);
+      return [...updated, { time: timestamp(), icon, msg }];
+    });
   }, []);
 
   useEffect(() => {
@@ -631,10 +635,10 @@ export default function App() {
         >
           <Flex direction="column" gap="0">
             <Text size="5" weight="bold" className="heading-text">
-              Dashboard
+              CRC Batch Processor
             </Text>
             <Text size="2" className="muted-text">
-              Upload & process criminal risk check batches
+              Upload rider data and run criminal risk checks via HyperVerge
             </Text>
           </Flex>
 
@@ -662,7 +666,12 @@ export default function App() {
             {/* Upload Card */}
             <Card className="main-card" style={{ padding: '32px' }}>
               <Flex direction="column" gap="5">
-                <Text size="4" weight="bold">Upload Daily Sheet</Text>
+                <Flex direction="column" gap="1">
+                  <Text size="4" weight="bold">Upload New File</Text>
+                  <Text size="2" className="muted-text">
+                    Upload an Excel or CSV file with rider details. Data is written to Google Sheets and CRC processing starts automatically.
+                  </Text>
+                </Flex>
 
                 {/* Drop Zone */}
                 <Box
@@ -717,6 +726,9 @@ export default function App() {
                       </Button>
                     )}
                   </Flex>
+                  <Text size="1" className="muted-text" style={{ opacity: 0.6 }}>
+                    If a sheet with this name already exists, you will be asked to confirm before overwriting.
+                  </Text>
                 </Flex>
 
                 {/* Upload Button */}
@@ -731,7 +743,7 @@ export default function App() {
                       <ReloadIcon style={{ animation: 'spin 1s linear infinite' }} />
                       <span>Uploading...</span>
                     </Flex>
-                  ) : 'Upload & Run CRC'}
+                  ) : 'Upload & Start Processing'}
                 </Button>
               </Flex>
             </Card>
@@ -741,8 +753,8 @@ export default function App() {
               <Card className="main-card" style={{ padding: '24px 28px' }}>
                 <Flex direction="column" gap="4">
                   <Flex direction="column" gap="1">
-                    <Text size="3" weight="bold">Re-run CRC</Text>
-                    <Text size="2" className="muted-text">Trigger the script on an existing sheet tab</Text>
+                    <Text size="3" weight="bold">Re-run on Existing Sheet</Text>
+                    <Text size="2" className="muted-text">Re-trigger CRC processing on a sheet tab that already exists in the spreadsheet. Useful for retrying failed rows.</Text>
                   </Flex>
                   <Flex gap="3" align="end">
                     <Flex direction="column" gap="2" style={{ flex: 1 }}>

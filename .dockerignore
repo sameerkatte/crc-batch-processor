@@ -4,3 +4,8 @@ dist
 service-account-key.json
 *.log
 .git
+.DS_Store
+active-jobs.json
+users.json
+buckets.json
+history.json

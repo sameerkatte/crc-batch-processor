@@ -13,14 +13,17 @@ import bcrypt from 'bcryptjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
-app.use(cors());
+// CORS: since the React app is served from the same origin, restrict to same-origin.
+// Allow explicit override via CORS_ORIGIN env var for dev/testing.
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || false, // false = same-origin only
+  credentials: true,
+}));
 app.use(express.json());
 
 // Serve built React app in production
 app.use(express.static(path.join(__dirname, 'dist')));
 
-// Health check for Railway
-app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const upload = multer({
@@ -46,12 +49,12 @@ const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL;
 const APPS_SCRIPT_API_KEY = process.env.APPS_SCRIPT_API_KEY;
 const GOOGLE_KEY_PATH = process.env.GOOGLE_KEY_PATH || './service-account-key.json';
-const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'crc-batch-default-secret-change-me';
+const PORT = process.env.PORT || 3001;
+const JWT_SECRET = process.env.JWT_SECRET;
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
 
 // Startup validation — fail fast if critical config is missing
-const requiredEnv = { SPREADSHEET_ID, APPS_SCRIPT_URL, APPS_SCRIPT_API_KEY };
+const requiredEnv = { SPREADSHEET_ID, APPS_SCRIPT_URL, APPS_SCRIPT_API_KEY, JWT_SECRET };
 for (const [key, val] of Object.entries(requiredEnv)) {
   if (!val) {
     console.error(`FATAL: Missing required env var ${key}. Check your .env file.`);
@@ -254,10 +257,16 @@ async function getSheets() {
   let credentials;
   if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
     // Railway / cloud: service account JSON passed as env var
-    credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
-  } else {
+    try {
+      credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+    } catch (parseErr) {
+      throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON. Check the env var value.');
+    }
+  } else if (existsSync(GOOGLE_KEY_PATH)) {
     // Local dev: read from file
     credentials = JSON.parse(readFileSync(GOOGLE_KEY_PATH, 'utf8'));
+  } else {
+    throw new Error('Google service account key missing. Set GOOGLE_SERVICE_ACCOUNT_JSON env var or provide ' + GOOGLE_KEY_PATH);
   }
 
   const auth = new google.auth.GoogleAuth({
@@ -304,6 +313,30 @@ function loadPersistedActiveJobs() {
   } catch { /* ignore corrupted file */ }
 }
 loadPersistedActiveJobs();
+
+// On startup: mark orphaned "running" history entries as stale
+// (e.g., server crashed or restarted while jobs were active)
+(function cleanStaleHistoryEntries() {
+  if (!existsSync(HISTORY_FILE)) return;
+  try {
+    const history = loadHistory();
+    let changed = false;
+    for (const entry of history) {
+      if (entry.status !== 'running') continue;
+      const jobKey = `${entry.bucketId || 'default'}:${entry.sheetName}`;
+      if (!activeJobs.has(jobKey)) {
+        // This job has no active tracker — mark it so UI doesn't show spinning forever
+        entry.status = 'done_with_errors';
+        entry.completedAt = entry.completedAt || new Date().toISOString();
+        changed = true;
+        console.log(`Startup cleanup: marked orphaned job "${entry.sheetName}" as done_with_errors.`);
+      }
+    }
+    if (changed) saveHistory(history);
+  } catch (err) {
+    console.error('Startup history cleanup failed:', err.message);
+  }
+})();
 
 function cleanStaleJobs() {
   const now = Date.now();
@@ -446,9 +479,37 @@ function parseFile(buffer) {
   return buildDataRows(rows, headers, mapping);
 }
 
+// ── Login Rate Limiter (in-memory, no extra dependency) ─────────────────────
+const loginAttempts = new Map();
+function loginRateLimiter(req, res, next) {
+  const ip = req.ip || req.connection.remoteAddress || 'unknown';
+  const now = Date.now();
+  const windowMs = 15 * 60 * 1000; // 15 min
+  const maxAttempts = 10;
+
+  const record = loginAttempts.get(ip);
+  if (record && now - record.firstAttempt < windowMs) {
+    if (record.count >= maxAttempts) {
+      return res.status(429).json({ error: 'Too many login attempts. Try again in 15 minutes.' });
+    }
+    record.count++;
+  } else {
+    loginAttempts.set(ip, { count: 1, firstAttempt: now });
+  }
+
+  // Cleanup old entries every 100 requests
+  if (loginAttempts.size > 100) {
+    for (const [key, val] of loginAttempts) {
+      if (now - val.firstAttempt > windowMs) loginAttempts.delete(key);
+    }
+  }
+
+  next();
+}
+
 // ── Auth Routes ─────────────────────────────────────────────────────────────
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', loginRateLimiter, (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required.' });
@@ -599,7 +660,6 @@ app.put('/api/admin/users/:email/password', authMiddleware, adminMiddleware, asy
 
   if (result.error) return res.status(result.status).json({ error: result.error });
   res.json(result);
-  res.json({ message: `Password updated for ${targetEmail}.` });
 });
 
 // ── Bucket Routes ────────────────────────────────────────────────────────────
@@ -1333,6 +1393,12 @@ app.get('/api/health', (req, res) => {
 // Fallback: serve React app for any non-API route
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+});
+
+// Global error handler — catches unhandled errors in routes
+app.use((err, _req, res, _next) => {
+  console.error('Unhandled error:', err);
+  res.status(err.status || 500).json({ error: 'Internal server error.' });
 });
 
 app.listen(PORT, () => {
