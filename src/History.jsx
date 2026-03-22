@@ -120,7 +120,7 @@ export default function History({ token, onViewLogs, logsMode }) {
               <Text size="1" className="muted-text" style={{ flex: '0 0 70px' }}></Text>
             </Flex>
 
-            {history.map((h) => (
+            {history.filter(h => h.type !== 'coupled').map((h) => (
               <Card key={h.id} className="main-card" style={{ padding: '14px 16px' }}>
                 <Flex align="center">
                   <Text size="2" weight="medium" style={{ flex: '1 1 120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -162,7 +162,7 @@ export default function History({ token, onViewLogs, logsMode }) {
         {/* ── JOB LOGS VIEW (execution-focused) ── */}
         {!loading && history.length > 0 && logsMode && (
           <Flex direction="column" gap="3">
-            {history.map((h) => {
+            {history.filter(h => h.type !== 'coupled').map((h) => {
               const pct = h.totalRows > 0 && h.processed != null
                 ? Math.round((h.processed / h.totalRows) * 100)
                 : (h.status === 'done' ? 100 : 0);
@@ -229,9 +229,10 @@ export default function History({ token, onViewLogs, logsMode }) {
                       </Text>
                     </Flex>
 
-                    {/* Trigger result for debugging */}
-                    {h.triggerResult && h.triggerResult !== 'JOB_STARTED' && h.triggerResult !== 'OK' && (
-                      <Text size="1" className="muted-text" style={{ fontFamily: 'monospace', opacity: 0.7 }}>
+                    {/* Trigger result — only show if it indicates a problem */}
+                    {h.triggerResult && h.triggerResult !== 'JOB_STARTED' && h.triggerResult !== 'OK'
+                      && !h.triggerResult.startsWith('STARTED') && (
+                      <Text size="1" style={{ fontFamily: 'monospace', color: h.triggerResult.startsWith('TRIGGER_FAILED') ? '#dc2626' : 'var(--gray-9)', opacity: 0.8 }}>
                         Trigger: {h.triggerResult}
                       </Text>
                     )}

@@ -413,7 +413,7 @@ export default function App() {
 
       if (res.status === 401) { handleLogout(); return; }
       if (res.status === 409 && data.activeJob) {
-        addLog('warn', `Job already running for "${data.sheetName}" — showing live status...`);
+        addLog('warn', `Job already running for "${data.sheetName}"${data.startedBy ? ` (started by ${data.startedBy})` : ''} — attaching to live status...`);
         setSheetUrl(data.sheetUrl);
         setSheetName(data.sheetName);
         setProgress({ processed: 0, total: data.totalRows, errors: 0 });
@@ -500,7 +500,7 @@ export default function App() {
 
       if (res.status === 401) { handleLogout(); return; }
       if (res.status === 409 && data.activeJob) {
-        addLog('warn', `Job already running for "${data.sheetName}" — showing live status...`);
+        addLog('warn', `Job already running for "${data.sheetName}"${data.startedBy ? ` (started by ${data.startedBy})` : ''} — attaching to live status...`);
         setSheetUrl(data.sheetUrl);
         setSheetName(data.sheetName);
         setProgress({ processed: 0, total: data.totalRows, errors: 0 });

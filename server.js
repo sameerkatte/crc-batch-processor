@@ -9,6 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import cron from 'node-cron';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -220,7 +221,7 @@ if (!existsSync(USERS_FILE) && ADMIN_EMAILS.length > 0) {
     createdAt: new Date().toISOString(),
   }));
   saveUsers(seedUsers);
-  console.log(`Seeded ${seedUsers.length} admin user(s). Default password: admin123 — CHANGE IT via admin panel.`);
+  console.log(`Seeded ${seedUsers.length} admin user(s) with default password. CHANGE IT via admin panel immediately.`);
 }
 
 // ── Auth Middleware ──────────────────────────────────────────────────────────
@@ -349,6 +350,264 @@ function cleanStaleJobs() {
   }
   if (cleaned) persistActiveJobs();
 }
+
+// ── Coupled CRC ──────────────────────────────────────────────────────────────
+
+// Convert YYYY-MM-DD → D/M/YY tab name (e.g. "2026-03-21" → "21/3/26")
+function dateToTabName(dateStr) {
+  const [year, month, day] = dateStr.split('-');
+  return `${parseInt(day)}/${parseInt(month)}/${year.slice(2)}`;
+}
+
+function getYesterdayDate() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().split('T')[0];
+}
+
+async function queryMetabase(cc, date) {
+  const sessionRes = await fetch(`${cc.metabaseUrl}/api/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: cc.metabaseUser, password: cc.metabasePassword }),
+  });
+  if (!sessionRes.ok) throw new Error(`Metabase auth failed: ${sessionRes.status}`);
+  const { id: sessionToken } = await sessionRes.json();
+
+  const sql = cc.metabaseSql.replace(/\{\{DATE\}\}/g, date);
+  const queryRes = await fetch(`${cc.metabaseUrl}/api/dataset`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Metabase-Session': sessionToken },
+    body: JSON.stringify({
+      database: Number(cc.metabaseDatabaseId) || 1,
+      type: 'native',
+      native: { query: sql },
+    }),
+  });
+  if (!queryRes.ok) throw new Error(`Metabase query failed: ${queryRes.status}`);
+  const data = await queryRes.json();
+  if (data.error) throw new Error(`Metabase query error: ${data.error}`);
+
+  const cols = (data.data?.cols || []).map(c => c.name.toLowerCase());
+  return (data.data?.rows || []).map(row =>
+    Object.fromEntries(cols.map((col, i) => [col, row[i]]))
+  );
+}
+
+async function fetchFromThomas(requestId, clientId, appId) {
+  const url = `https://ind-engine.thomas.hyperverge.co/v1/ui/request/logs?requestId=${encodeURIComponent(requestId)}&clientId=${encodeURIComponent(clientId)}`;
+  const res = await fetch(url, {
+    headers: { appId, Accept: 'application/json' },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`Thomas fetch failed for ${requestId}: ${res.status}`);
+  return await res.json();
+}
+
+async function writeCoupledSheet(bucket, rows, tabName) {
+  const sheets = await getSheets();
+  const spreadsheetId = bucket.coupledConfig.coupledSpreadsheetId;
+
+  // Add sheet tab — ignore error if it already exists (idempotent re-run)
+  try {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: { requests: [{ addSheet: { properties: { title: tabName } } }] },
+    });
+  } catch (err) {
+    if (!err.message?.includes('already exists')) throw err;
+    console.log(`[Coupled] Tab "${tabName}" already exists — overwriting.`);
+  }
+
+  const HEADER = [
+    'TransactionId', 'requestId', 'Name', 'Father name', 'Address',
+    'Color', 'Revised Color', 'Reason for change in color',
+    'case array', 'overallResult', 'Number of cases',
+    'Case1 Act', 'Case1 Section', 'Case1 link',
+    'Case2 Act', 'Case2 Section', 'Case2 link',
+    'Case3 Act', 'Case3 Section', 'Case3 link',
+    'Case4 Act', 'Case4 Section', 'Case4 link',
+    'Case5 Act', 'Case5 Section', 'Case5 link',
+  ];
+
+  const dataRows = rows.map(r => {
+    const fetched = r._fetcherResult || {};
+    const result = fetched.result || {};
+    const cases = result.result || [];
+    const caseColumns = [];
+    for (let i = 0; i < 5; i++) {
+      caseColumns.push(cases[i]?.underActs || '', cases[i]?.underSections || '', cases[i]?.link || '');
+    }
+    return [
+      r.transactionid || r.transactionId || '',
+      r.requestid || r.requestId || '',
+      r.name || '',
+      r.fathername || r.fatherName || r['father name'] || '',
+      r.address || '',
+      result.color || '',
+      '', // Revised Color — manual QC
+      '', // Reason for change — manual QC
+      JSON.stringify(result.result || []),
+      JSON.stringify(fetched),
+      result.numberOfCases ?? '',
+      ...caseColumns,
+    ];
+  });
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: `'${tabName}'!A1`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [HEADER, ...dataRows] },
+  });
+}
+
+async function triggerKuberanScript(bucket, sheetName) {
+  const cc = bucket.coupledConfig;
+  if (!cc.coupledAppsScriptUrl) return 'NO_SCRIPT_URL';
+  const body = JSON.stringify({ fileName: sheetName, config: { spreadsheetId: cc.coupledSpreadsheetId } });
+  try {
+    const res = await fetch(`${cc.coupledAppsScriptUrl}?apiKey=${cc.coupledAppsScriptApiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      signal: AbortSignal.timeout(15000),
+    });
+    return res.ok ? 'TRIGGERED' : `TRIGGER_FAILED: ${res.status}`;
+  } catch {
+    return 'TRIGGER_FAILED: timeout';
+  }
+}
+
+async function sendSlackReport(bucket, summary) {
+  const cc = bucket.coupledConfig;
+  if (!cc?.slackToken || !cc?.slackChannel) return;
+  const text = `*CRC Coupled Run — ${bucket.name}*\nDate: ${summary.date}\nRecords: ${summary.count}\nErrors: ${summary.errors}\nStatus: ${summary.status}`;
+  try {
+    await fetch('https://slack.com/api/chat.postMessage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cc.slackToken}` },
+      body: JSON.stringify({ channel: cc.slackChannel, text }),
+    });
+  } catch (e) {
+    console.warn('Slack report failed:', e.message);
+  }
+}
+
+const runningCoupledJobs = new Set();
+
+async function runCoupledJob(bucketId, date) {
+  const jobKey = `${bucketId}:${date}`;
+  if (runningCoupledJobs.has(jobKey)) {
+    console.log(`[Coupled] ${bucketId}: job already running for ${date}, skipping.`);
+    return;
+  }
+  runningCoupledJobs.add(jobKey);
+
+  const bucket = getBucket(bucketId);
+  const cc = bucket?.coupledConfig;
+  if (!cc?.enabled) { runningCoupledJobs.delete(jobKey); return; }
+
+  const tabName = dateToTabName(date);
+  const historyId = `coupled-${Date.now()}-${bucketId}`;
+  let errors = 0;
+
+  await addHistoryEntry({
+    id: historyId, type: 'coupled',
+    bucketId, date, tabName,
+    status: 'running', startedAt: new Date().toISOString(),
+  });
+
+  await withBuckets(buckets => {
+    const b = buckets.find(x => x.id === bucketId);
+    if (b?.coupledConfig) {
+      b.coupledConfig.lastRunAt = new Date().toISOString();
+      b.coupledConfig.lastRunStatus = 'running';
+    }
+  });
+
+  try {
+    console.log(`[Coupled] ${bucketId}: querying Metabase for ${date}`);
+    const rows = await queryMetabase(cc, date);
+    console.log(`[Coupled] ${bucketId}: got ${rows.length} records`);
+
+    // Fetch from Thomas in parallel batches of 10
+    const CONCURRENCY = 10;
+    for (let i = 0; i < rows.length; i += CONCURRENCY) {
+      await Promise.all(rows.slice(i, i + CONCURRENCY).map(async row => {
+        const rid = row.requestid || row.requestId;
+        if (!rid) { errors++; return; }
+        try {
+          row._fetcherResult = await fetchFromThomas(rid, cc.fetcherClientId, cc.fetcherAppId);
+        } catch (e) {
+          console.warn(`[Coupled] Thomas fetch error for ${rid}: ${e.message}`);
+          row._fetcherResult = null;
+          errors++;
+        }
+      }));
+    }
+
+    await writeCoupledSheet(bucket, rows, tabName);
+    const triggerResult = await triggerKuberanScript(bucket, tabName);
+    console.log(`[Coupled] ${bucketId}: trigger result: ${triggerResult}`);
+
+    const finalStatus = errors > 0 ? 'done_with_errors' : 'done';
+    await sendSlackReport(bucket, { date, count: rows.length, errors, status: finalStatus });
+
+    await withHistory(history => {
+      const e = history.find(h => h.id === historyId);
+      if (e) Object.assign(e, { status: finalStatus, completedAt: new Date().toISOString(), count: rows.length, errors, triggerResult });
+    });
+    await withBuckets(buckets => {
+      const b = buckets.find(x => x.id === bucketId);
+      if (b?.coupledConfig) {
+        b.coupledConfig.lastRunStatus = finalStatus;
+        b.coupledConfig.lastRunCount = rows.length;
+      }
+    });
+
+  } catch (err) {
+    console.error(`[Coupled] ${bucketId} failed:`, err.message);
+    await sendSlackReport(bucket, { date, count: 0, errors: 1, status: 'failed' });
+    await withHistory(history => {
+      const e = history.find(h => h.id === historyId);
+      if (e) Object.assign(e, { status: 'done_with_errors', completedAt: new Date().toISOString(), error: err.message });
+    });
+    await withBuckets(buckets => {
+      const b = buckets.find(x => x.id === bucketId);
+      if (b?.coupledConfig) b.coupledConfig.lastRunStatus = 'failed';
+    });
+  } finally {
+    runningCoupledJobs.delete(jobKey);
+  }
+}
+
+// ── Cron Manager ──────────────────────────────────────────────────────────────
+
+const cronJobs = new Map();
+
+function scheduleBucketCron(bucket) {
+  if (cronJobs.has(bucket.id)) {
+    cronJobs.get(bucket.id).stop();
+    cronJobs.delete(bucket.id);
+  }
+  const cc = bucket.coupledConfig;
+  if (!cc?.enabled || !cc.cronSchedule) return;
+  if (!cron.validate(cc.cronSchedule)) {
+    console.warn(`Invalid cron schedule for bucket ${bucket.id}: "${cc.cronSchedule}"`);
+    return;
+  }
+  const task = cron.schedule(cc.cronSchedule, () => {
+    runCoupledJob(bucket.id, getYesterdayDate());
+  });
+  cronJobs.set(bucket.id, task);
+  console.log(`Scheduled coupled cron for bucket "${bucket.id}": ${cc.cronSchedule}`);
+}
+
+function setupCronJobs() {
+  for (const b of loadBuckets()) scheduleBucketCron(b);
+}
+setupCronJobs();
 
 function buildTriggerBody(sheetName, bucket) {
   return JSON.stringify({
@@ -674,6 +933,10 @@ app.post('/api/admin/buckets', authMiddleware, adminMiddleware, async (req, res)
   if (!name || !spreadsheetId || !appsScriptUrl || !appsScriptApiKey) {
     return res.status(400).json({ error: 'All fields are required: name, spreadsheetId, appsScriptUrl, appsScriptApiKey.' });
   }
+  const cronSchedule = req.body.coupledConfig?.cronSchedule;
+  if (cronSchedule && !cron.validate(cronSchedule)) {
+    return res.status(400).json({ error: `Invalid cron schedule: "${cronSchedule}". Example: "30 0 * * *" = 12:30 AM daily.` });
+  }
 
   const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `bucket-${Date.now()}`;
 
@@ -681,7 +944,7 @@ app.post('/api/admin/buckets', authMiddleware, adminMiddleware, async (req, res)
     if (buckets.find(b => b.id === id)) {
       return { error: `Bucket "${id}" already exists.`, status: 409 };
     }
-    buckets.push({
+    const newBucket = {
       id,
       name: name.trim(),
       spreadsheetId: spreadsheetId.trim(),
@@ -694,17 +957,24 @@ app.post('/api/admin/buckets', authMiddleware, adminMiddleware, async (req, res)
       qps: Number(req.body.qps) || DEFAULT_HV_CONFIG.qps,
       maxRetries: Number(req.body.maxRetries) || DEFAULT_HV_CONFIG.maxRetries,
       createdAt: new Date().toISOString(),
-    });
-    return { message: `Bucket "${name}" created.`, id };
+      coupledConfig: req.body.coupledConfig || null,
+    };
+    buckets.push(newBucket);
+    return { message: `Bucket "${name}" created.`, id, bucket: newBucket };
   });
 
   if (result.error) return res.status(result.status).json({ error: result.error });
-  res.json(result);
+  if (result.bucket) scheduleBucketCron(result.bucket);
+  res.json({ message: result.message, id: result.id });
 });
 
 app.put('/api/admin/buckets/:id', authMiddleware, adminMiddleware, async (req, res) => {
   const bucketId = req.params.id;
   const { name, spreadsheetId, appsScriptUrl, appsScriptApiKey } = req.body;
+  const putCronSchedule = req.body.coupledConfig?.cronSchedule;
+  if (putCronSchedule && !cron.validate(putCronSchedule)) {
+    return res.status(400).json({ error: `Invalid cron schedule: "${putCronSchedule}". Example: "30 0 * * *" = 12:30 AM daily.` });
+  }
 
   const result = await withBuckets(buckets => {
     const bucket = buckets.find(b => b.id === bucketId);
@@ -720,12 +990,14 @@ app.put('/api/admin/buckets/:id', authMiddleware, adminMiddleware, async (req, r
     if (req.body.batchSize !== undefined) bucket.batchSize = Number(req.body.batchSize) || 100;
     if (req.body.qps !== undefined) bucket.qps = Number(req.body.qps) || 15;
     if (req.body.maxRetries !== undefined) bucket.maxRetries = Number(req.body.maxRetries) || 3;
+    if (req.body.coupledConfig !== undefined) bucket.coupledConfig = req.body.coupledConfig;
 
-    return { message: `Bucket "${bucket.name}" updated.` };
+    return { message: `Bucket "${bucket.name}" updated.`, bucket };
   });
 
   if (result.error) return res.status(result.status).json({ error: result.error });
-  res.json(result);
+  if (result.bucket) scheduleBucketCron(result.bucket);
+  res.json({ message: result.message });
 });
 
 app.delete('/api/admin/buckets/:id', authMiddleware, adminMiddleware, async (req, res) => {
@@ -734,24 +1006,28 @@ app.delete('/api/admin/buckets/:id', authMiddleware, adminMiddleware, async (req
     return res.status(400).json({ error: 'Cannot delete the default bucket.' });
   }
 
-  // Lock both files since we modify buckets and potentially users
-  const result = await withBuckets(buckets => {
+  // Delete bucket (locked)
+  const deleteResult = await withBuckets(buckets => {
     const idx = buckets.findIndex(b => b.id === bucketId);
     if (idx === -1) return { error: 'Bucket not found.', status: 404 };
     buckets.splice(idx, 1);
+    return { ok: true };
+  });
+  if (deleteResult.error) return res.status(deleteResult.status).json({ error: deleteResult.error });
 
-    // Reassign users in this bucket to default
-    const users = loadUsers();
-    let reassigned = 0;
+  // Reassign users separately (separate lock — avoids race on users.json)
+  let reassigned = 0;
+  await withUsers(users => {
     for (const u of users) {
       if (u.bucketId === bucketId) { u.bucketId = 'default'; reassigned++; }
     }
-    if (reassigned > 0) saveUsers(users);
-
-    return { message: `Bucket deleted. ${reassigned} user(s) moved to default.` };
   });
 
+  const result = { message: `Bucket deleted. ${reassigned} user(s) moved to default.` };
+
   if (result.error) return res.status(result.status).json({ error: result.error });
+  // Cancel cron if exists
+  if (cronJobs.has(bucketId)) { cronJobs.get(bucketId).stop(); cronJobs.delete(bucketId); }
   res.json(result);
 });
 
@@ -1186,6 +1462,8 @@ app.get('/api/status', authMiddleware, async (req, res) => {
     if (!sheetName) {
       return res.status(400).json({ error: 'sheet query param required.' });
     }
+    const nameError = validateSheetName(sheetName);
+    if (nameError) return res.status(400).json({ error: nameError });
 
     // Resolve user's bucket
     const userBucketId = req.user.bucketId || 'default';
@@ -1383,6 +1661,36 @@ app.get('/api/my-bucket', authMiddleware, (req, res) => {
     bucketName: bucket.name,
     sheetUrl: `https://docs.google.com/spreadsheets/d/${bucket.spreadsheetId}/edit`,
   });
+});
+
+// ── Coupled CRC Routes ────────────────────────────────────────────────────────
+
+// POST /api/coupled/run/:bucketId — manually trigger a coupled job (admin only)
+app.post('/api/coupled/run/:bucketId', authMiddleware, adminMiddleware, async (req, res) => {
+  const { bucketId } = req.params;
+  const date = req.body.date || getYesterdayDate();
+
+  // Validate date format
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' });
+  }
+
+  const bucket = await getBucket(bucketId);
+  if (!bucket) return res.status(404).json({ error: 'Bucket not found.' });
+  if (!bucket.coupledConfig?.enabled) {
+    return res.status(400).json({ error: 'Coupled CRC is not enabled for this bucket.' });
+  }
+
+  // Fire and forget — don't await, let it run in background
+  runCoupledJob(bucketId, date).catch(err => console.error(`Coupled job error: ${err.message}`));
+  res.json({ message: `Coupled job started for bucket "${bucket.name}" (date: ${date}).` });
+});
+
+// GET /api/coupled/history — get coupled job history (admin only)
+app.get('/api/coupled/history', authMiddleware, adminMiddleware, (req, res) => {
+  const { bucketId } = req.query;
+  const history = loadHistory().filter(h => h.type === 'coupled' && (!bucketId || h.bucketId === bucketId));
+  res.json({ history });
 });
 
 // GET /api/health — quick health check
